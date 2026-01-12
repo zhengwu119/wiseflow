@@ -1,0 +1,132 @@
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { Plus, Play, Trash2, Edit2, Clock, Database } from 'lucide-vue-next'
+import Button from '../../components/ui/Button.vue'
+import Card from '../../components/ui/Card.vue'
+import Badge from '../../components/ui/Badge.vue'
+import Modal from '../../components/ui/Modal.vue'
+import TaskForm from './TaskForm.vue'
+import { useTaskStore } from '../../stores/taskStore'
+
+const store = useTaskStore()
+const showCreateModal = ref(false)
+
+const openCreateModal = () => {
+    showCreateModal.value = true
+}
+
+onMounted(() => {
+    store.fetchTasks()
+})
+</script>
+
+<template>
+  <div class="p-8 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">任务管理</h1>
+        <p class="text-gray-500 dark:text-gray-400 mt-1">管理数据采集指令和计划。</p>
+      </div>
+      <Button @click="openCreateModal">
+        <Plus class="w-4 h-4 mr-2" />
+        新建任务
+      </Button>
+    </div>
+
+    <!-- Stats Overview (Placeholder/Real) -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <Card class="p-6 flex items-center">
+            <div class="p-3 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 mr-4">
+                <Database class="w-6 h-6" />
+            </div>
+            <div>
+                <p class="text-sm font-medium text-gray-500 dark:text-gray-400">总任务数</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ store.tasks.length }}</p>
+            </div>
+        </Card>
+        <Card class="p-6 flex items-center">
+            <div class="p-3 rounded-full bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 mr-4">
+                <Play class="w-6 h-6" />
+            </div>
+            <div>
+                <p class="text-sm font-medium text-gray-500 dark:text-gray-400">活跃任务</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ store.tasks.filter(t => t.activated).length }}</p>
+            </div>
+        </Card>
+        <Card class="p-6 flex items-center">
+             <!-- Placeholder for run time -->
+            <div class="p-3 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 mr-4">
+                <Clock class="w-6 h-6" />
+            </div>
+            <div>
+                <p class="text-sm font-medium text-gray-500 dark:text-gray-400">平均运行时间</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</p>
+            </div>
+        </Card>
+    </div>
+
+    <!-- Task Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+      <Card v-for="task in store.tasks" :key="task.id" class="p-0 hover:shadow-md transition-shadow">
+        <div class="p-5">
+            <div class="flex justify-between items-start mb-4">
+                <div class="flex-1">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ task.title || '无标题任务' }} <span class="text-xs text-gray-400">(ID: {{ task.id }})</span></h3>
+                    <div class="flex items-center mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        <Clock class="w-3.5 h-3.5 mr-1" />
+                        <span>上次运行: {{ task.last_run || '从未' }}</span>
+                    </div>
+                </div>
+                <Badge :variant="task.activated ? 'success' : 'neutral'">
+                    {{ task.activated ? '活跃' : '已暂停' }}
+                </Badge>
+            </div>
+            
+            <div class="space-y-3 mb-6">
+                 <!-- Stats placeholder -->
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-500 dark:text-gray-400">来源数</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">{{ (task.search?.length || 0) + (task.sources?.length || 0) }}</span>
+                </div>
+                
+                <div class="flex flex-wrap gap-2">
+                    <span v-for="s in task.search" :key="s" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+                        {{ s }}
+                    </span>
+                     <span v-for="src in task.sources" :key="src.type" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                        {{ src.type }}
+                    </span>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 pt-4 border-t border-gray-100 dark:border-gray-700">
+                <Button variant="ghost" size="sm" class="flex-1">
+                    <Edit2 class="w-4 h-4 mr-2" />
+                    编辑
+                </Button>
+                 <Button variant="ghost" size="sm" class="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20" @click="store.deleteTask(task.id)">
+                    <Trash2 class="w-4 h-4 mr-2" />
+                    删除
+                </Button>
+            </div>
+        </div>
+      </Card>
+      
+      <!-- New Task Card -->
+      <button @click="openCreateModal" class="group flex flex-col items-center justify-center p-8 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl hover:border-primary hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all text-center h-full min-h-[250px]">
+        <div class="p-4 rounded-full bg-gray-100 dark:bg-gray-800 group-hover:bg-green-100 dark:group-hover:bg-green-900/30 text-gray-400 group-hover:text-primary transition-colors mb-4">
+            <Plus class="w-8 h-8" />
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">新建任务</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-xs">设置新的情报采集流程。</p>
+      </button>
+    </div>
+
+    <!-- Create Modal -->
+    <Modal :show="showCreateModal" @close="showCreateModal = false" title="新建任务" max-width="2xl">
+        <TaskForm @success="showCreateModal = false" @cancel="showCreateModal = false" />
+    </Modal>
+
+  </div>
+</template>
