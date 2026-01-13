@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { Plus, Trash2, Globe, Target } from 'lucide-vue-next'
 import Button from '../../components/ui/Button.vue'
 import Input from '../../components/ui/Input.vue'
 import { useTaskStore } from '../../stores/taskStore'
-import type { Focus } from '../../types/api'
+import type { Focus, Task } from '../../types/api'
 
+interface Props {
+  task?: Task
+}
+
+const props = defineProps<Props>()
 const emit = defineEmits(['success', 'cancel'])
 const store = useTaskStore()
 
 const loading = ref(false)
+const isEditMode = ref(!!props.task)
 
 const form = reactive({
   title: '',
@@ -57,6 +63,43 @@ const removeFocus = (index: number) => {
     form.focuses.splice(index, 1)
 }
 
+// Initialize form data
+const initializeForm = () => {
+    if (props.task) {
+        form.title = props.task.title || ''
+        form.time_slots = [...(props.task.time_slots || [])]
+        form.search = [...(props.task.search || [])]
+        form.sources = props.task.sources ? JSON.parse(JSON.stringify(props.task.sources)) : []
+        
+        // Initialize focuses - handle both number IDs and Focus objects
+        form.focuses = (props.task.focuses || []).map(f => {
+            if (typeof f === 'number') {
+                // If it's just an ID, create empty focus (shouldn't happen in edit mode)
+                return {
+                    id: f,
+                    focuspoint: '',
+                    custom_schema: '',
+                    restrictions: '',
+                    explanation: '',
+                    role: '',
+                    purpose: ''
+                }
+            } else {
+                // Clone the Focus object
+                return { ...f }
+            }
+        })
+        
+        // Convert sources to monitorUrls format
+        monitorUrls.value = []
+        props.task.sources?.forEach(src => {
+            src.detail?.forEach(url => {
+                monitorUrls.value.push({ url, type: src.type })
+            })
+        })
+    }
+}
+
 const handleSubmit = async () => {
     loading.value = true
     
@@ -76,14 +119,27 @@ const handleSubmit = async () => {
     }))
 
     try {
-        await store.addTask({
-            title: form.title,
-            search: form.search,
-            sources: sourcesPayload,
-            focuses: form.focuses.map(f => ({ ...f })), // Clone objects
-            time_slots: form.time_slots,
-            activated: true
-        })
+        if (isEditMode.value && props.task) {
+            // Update existing task
+            await store.updateTask(props.task.id, {
+                title: form.title,
+                search: form.search,
+                sources: sourcesPayload,
+                focuses: form.focuses.map(f => ({ ...f })),
+                time_slots: form.time_slots,
+                activated: true
+            })
+        } else {
+            // Create new task
+            await store.addTask({
+                title: form.title,
+                search: form.search,
+                sources: sourcesPayload,
+                focuses: form.focuses.map(f => ({ ...f })),
+                time_slots: form.time_slots,
+                activated: true
+            })
+        }
         emit('success')
     } catch (e) {
         // error handled in store
@@ -91,6 +147,10 @@ const handleSubmit = async () => {
         loading.value = false
     }
 }
+
+onMounted(() => {
+    initializeForm()
+})
 </script>
 
 <template>
@@ -242,7 +302,7 @@ const handleSubmit = async () => {
     <!-- Actions -->
     <div class="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
         <Button variant="secondary" @click="$emit('cancel')">取消</Button>
-        <Button @click="handleSubmit" :loading="loading">创建任务</Button>
+        <Button @click="handleSubmit" :loading="loading">{{ isEditMode ? '更新任务' : '创建任务' }}</Button>
     </div>
   </div>
 </template>

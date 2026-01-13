@@ -7,12 +7,25 @@ import Badge from '../../components/ui/Badge.vue'
 import Modal from '../../components/ui/Modal.vue'
 import TaskForm from './TaskForm.vue'
 import { useTaskStore } from '../../stores/taskStore'
+import type { Task } from '../../types/api'
 
 const store = useTaskStore()
 const showCreateModal = ref(false)
+const showEditModal = ref(false)
+const editingTask = ref<Task | null>(null)
 
 const openCreateModal = () => {
     showCreateModal.value = true
+}
+
+const openEditModal = (task: Task) => {
+    editingTask.value = { ...task }
+    showEditModal.value = true
+}
+
+const closeEditModal = () => {
+    showEditModal.value = false
+    editingTask.value = null
 }
 
 onMounted(() => {
@@ -101,7 +114,7 @@ onMounted(() => {
             </div>
 
             <div class="flex items-center gap-2 pt-4 border-t border-gray-100 dark:border-gray-700">
-                <Button variant="ghost" size="sm" class="flex-1">
+                <Button variant="ghost" size="sm" class="flex-1" @click="openEditModal(task)">
                     <Edit2 class="w-4 h-4 mr-2" />
                     编辑
                 </Button>
@@ -125,7 +138,12 @@ onMounted(() => {
 
     <!-- Create Modal -->
     <Modal :show="showCreateModal" @close="showCreateModal = false" title="新建任务" max-width="2xl">
-        <TaskForm @success="showCreateModal = false" @cancel="showCreateModal = false" />
+        <TaskForm @success="showCreateModal = false; store.fetchTasks()" @cancel="showCreateModal = false" />
+    </Modal>
+
+    <!-- Edit Modal -->
+    <Modal :show="showEditModal" @close="closeEditModal" title="编辑任务" max-width="2xl">
+        <TaskForm v-if="editingTask" :task="editingTask" @success="closeEditModal(); store.fetchTasks()" @cancel="closeEditModal()" />
     </Modal>
 
   </div>
