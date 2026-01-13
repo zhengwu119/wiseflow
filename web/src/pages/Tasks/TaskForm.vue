@@ -24,10 +24,10 @@ const platformOptions = [
 ]
 
 const timeSlotOptions = [
-    { label: '上午', value: '1st' },
-    { label: '下午', value: '2nd' },
-    { label: '晚上', value: '3rd' },
-    { label: '凌晨', value: '4th' },
+    { label: '上午', value: 'first' },
+    { label: '下午', value: 'second' },
+    { label: '晚上', value: 'third' },
+    { label: '凌晨', value: 'fourth' },
 ]
 
 // Monitor logic
