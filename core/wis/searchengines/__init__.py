@@ -107,10 +107,12 @@ async def search_with_engine(engine: str,
         if search_results:
             for i, res in enumerate(search_results[:5]):  # Print first 5 results
                 wis_logger.info(f"[{engine}] result[{i}]: url={res.get('url', 'N/A')[:100]}, title={res.get('title', 'N/A')[:80]}")
+            # Only cache non-empty results to avoid blocking future searches
+            if cache_manager:
+                await cache_manager.set(query, search_results, 60*24, namespace=engine)
         else:
             wis_logger.warning(f"[{engine}] No results parsed! HTML contains 'b_results': {'b_results' in html if html else False}, 'b_algo': {'b_algo' in html if html else False}")
-        if cache_manager:
-            await cache_manager.set(query, search_results, 60*24, namespace=engine)
+            # Do NOT cache empty results - next attempt may succeed
 
     articles = []
     markdown = ""

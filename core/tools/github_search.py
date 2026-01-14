@@ -93,7 +93,8 @@ async def search_with_github(query: str, existings: set[str] = set(), cache_mana
         # Parse response
         raw_result = parse_response(response.text)
 
-        if cache_manager:
+        # Only cache non-empty results to avoid blocking future searches
+        if cache_manager and raw_result:
             await cache_manager.set(query, raw_result, 60*24, namespace='github_search')
     
     markdown = ""

@@ -41,7 +41,8 @@ async def fetch_rss(url, existings: set=set(), cache_manager: SqliteCache = None
             raise RuntimeError(f"RSS from {url}: {parsed.get('bozo_exception', '')}")
         
         entries = parsed.entries
-        if cache_manager:
+        # Only cache non-empty results to avoid blocking future fetches
+        if cache_manager and entries:
             await cache_manager.set(url, entries, 60*24, namespace='rss')
     
     results = []
