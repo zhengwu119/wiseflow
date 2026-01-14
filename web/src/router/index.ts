@@ -4,6 +4,8 @@ import Dashboard from '../pages/Dashboard.vue'
 import Feed from '../pages/Feed.vue'
 import TaskList from '../pages/Tasks/TaskList.vue'
 import Settings from '../pages/Settings.vue'
+import User from '../pages/User.vue'
+import Guide from '../pages/Guide.vue'
 
 const routes = [
     {
@@ -15,6 +17,8 @@ const routes = [
             { path: 'feed', component: Feed, name: 'Feed' },
             { path: 'tasks', component: TaskList, name: 'Tasks' },
             { path: 'settings', component: Settings, name: 'Settings' },
+            { path: 'user', component: User, name: 'User' },
+            { path: 'guide', component: Guide, name: 'Guide' },
         ]
     }
 ]

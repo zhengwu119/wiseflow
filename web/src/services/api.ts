@@ -5,8 +5,14 @@ import type {
     ProxyRequest, KdlProxyRequest, Config, MCBackupAccount
 } from '../types/api'
 
-// Determine base URL (default to localhost:8077 if VITE_API_URL not set)
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8077'
+// Determine base URL
+// - In Docker: use '/api' prefix (nginx will proxy to backend)
+// - In development: use VITE_API_URL or default to localhost:8077
+const API_URL = import.meta.env.VITE_API_URL || (
+    window.location.hostname === 'localhost' && window.location.port === '5173'
+        ? 'http://localhost:8077'  // Dev server
+        : '/api'  // Docker/production (nginx proxy)
+)
 
 const client = axios.create({
     baseURL: API_URL,
@@ -26,6 +32,8 @@ export const api = {
     updateTask: (data: TaskUpdateRequest) => client.put<APIResponse<number>>('/update_task', data).then(res => res.data),
 
     clearTaskErrors: (taskId: number) => client.get<APIResponse<any>>('/clear_task_errors', { params: { task_id: taskId } }).then(res => res.data),
+
+    runTaskNow: (taskId: number) => client.post<APIResponse<number>>('/run_task', null, { params: { task_id: taskId } }).then(res => res.data),
 
     // Focus Management
     readFocus: () => client.get<APIResponse<any[]>>('/read_focus').then(res => res.data),

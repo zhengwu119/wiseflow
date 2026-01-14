@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { ExternalLink, Calendar, RefreshCw } from 'lucide-vue-next'
+import { ref, computed, onMounted, watch } from 'vue'
+import { ExternalLink, Calendar, RefreshCw, Wifi, WifiOff } from 'lucide-vue-next'
 import Card from '../components/ui/Card.vue'
 import Badge from '../components/ui/Badge.vue'
 import Input from '../components/ui/Input.vue'
@@ -8,6 +8,10 @@ import Button from '../components/ui/Button.vue'
 import Drawer from '../components/ui/Drawer.vue'
 import { api } from '../services/api'
 import type { Info } from '../types/api'
+import { useWsStore } from '../stores/wsStore'
+
+// WebSocket store for real-time updates
+const wsStore = useWsStore()
 
 // State
 const feedItems = ref<Info[]>([])
@@ -16,11 +20,40 @@ const error = ref<string | null>(null)
 const selectedItem = ref<Info | null>(null)
 const showDrawer = ref(false)
 const searchQuery = ref('')
+const hasNewData = ref(false)
+
+// Watch for new notifications that indicate task completion (code=1)
+// When a task completes, we should refresh the feed
+watch(() => wsStore.notifyCount, (newCount, oldCount) => {
+    if (newCount > oldCount) {
+        // New notification received, mark that new data may be available
+        hasNewData.value = true
+    }
+})
+
+// Computed - filtered feed items based on search query
+const filteredFeedItems = computed(() => {
+    if (!searchQuery.value.trim()) {
+        return feedItems.value
+    }
+    const query = searchQuery.value.toLowerCase().trim()
+    return feedItems.value.filter(item => {
+        const content = (item.content || '').toLowerCase()
+        const title = (item.source_title || '').toLowerCase()
+        const focusStatement = (item.focus_statement || '').toLowerCase()
+        const sourceUrl = (item.source_url || '').toLowerCase()
+        return content.includes(query) ||
+               title.includes(query) ||
+               focusStatement.includes(query) ||
+               sourceUrl.includes(query)
+    })
+})
 
 // Methods
 const loadFeed = async () => {
     loading.value = true
     error.value = null
+    hasNewData.value = false  // Reset new data indicator
     try {
         const res = await api.listInfo()
         if (res.success) {
@@ -71,14 +104,29 @@ onMounted(() => {
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
       <div>
         <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">情报流</h1>
-        <p class="text-gray-500 dark:text-gray-400 mt-1">实时收集并经 LLM 处理的情报信息。</p>
+        <p class="text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-2">
+          实时收集并经 LLM 处理的情报信息。
+          <span v-if="wsStore.isConnected" class="inline-flex items-center text-xs text-green-600 dark:text-green-400">
+            <Wifi class="w-3 h-3 mr-1" /> 已连接
+          </span>
+          <span v-else class="inline-flex items-center text-xs text-gray-400">
+            <WifiOff class="w-3 h-3 mr-1" /> 未连接
+          </span>
+        </p>
       </div>
       <div class="flex gap-2 w-full md:w-auto">
          <Input v-model="searchQuery" placeholder="搜索情报..." class="w-full md:w-64" />
-         <Button @click="loadFeed" :loading="loading" variant="secondary">
+         <Button @click="loadFeed" :loading="loading" :variant="hasNewData ? 'primary' : 'secondary'">
             <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />
+            <span v-if="hasNewData" class="ml-1 text-xs">有新数据</span>
          </Button>
       </div>
+    </div>
+
+    <!-- New Data Banner -->
+    <div v-if="hasNewData" class="mb-4 p-3 bg-primary/10 border border-primary/30 rounded-lg flex items-center justify-between">
+      <span class="text-sm text-primary font-medium">有新的情报数据可用</span>
+      <Button size="sm" @click="loadFeed" :loading="loading">立即刷新</Button>
     </div>
 
     <!-- Error State -->
@@ -88,11 +136,16 @@ onMounted(() => {
 
     <!-- Feed List -->
     <div class="space-y-4">
-        <div v-if="feedItems.length === 0 && !loading" class="text-center py-10 text-gray-500">
-            暂无情报数据，请先创建任务开始采集。
+        <div v-if="filteredFeedItems.length === 0 && !loading" class="text-center py-10 text-gray-500">
+            <template v-if="searchQuery && feedItems.length > 0">
+                未找到匹配"{{ searchQuery }}"的情报。
+            </template>
+            <template v-else>
+                暂无情报数据，请先创建任务开始采集。
+            </template>
         </div>
 
-        <Card v-for="item in feedItems" :key="item.id" class="hover:border-primary/50 transition-colors cursor-pointer group" @click="openDetail(item)">
+        <Card v-for="item in filteredFeedItems" :key="item.id" class="hover:border-primary/50 transition-colors cursor-pointer group" @click="openDetail(item)">
             <div class="p-5">
                 <div class="flex justify-between items-start mb-2">
                     <Badge variant="primary">{{ getDomain(item.source_url) }}</Badge>

@@ -21,9 +21,12 @@ export interface Task {
     search: string[]
     sources: { type: string; detail: string[] }[]
     focuses: (number | Focus)[] // ID or Object
+    schedule_mode?: 'slots' | 'custom'
     time_slots: string[]
-    status?: string
+    custom_times?: string[]
+    interval_hours?: number
     last_run?: string
+    status?: string
     errors?: string
 }
 
@@ -32,7 +35,10 @@ export interface TaskRequest {
     search?: string[]
     sources?: { type: string; detail: string[] }[]
     activated?: boolean
+    schedule_mode?: 'slots' | 'custom'
     time_slots?: string[]
+    custom_times?: string[]
+    interval_hours?: number
     title?: string
 }
 

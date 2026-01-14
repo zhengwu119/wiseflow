@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Plus, Play, Trash2, Edit2, Clock, Database } from 'lucide-vue-next'
+import { Plus, Play, Trash2, Edit2, Clock, Database, Zap, RefreshCw } from 'lucide-vue-next'
 import Button from '../../components/ui/Button.vue'
 import Card from '../../components/ui/Card.vue'
 import Badge from '../../components/ui/Badge.vue'
 import Modal from '../../components/ui/Modal.vue'
 import TaskForm from './TaskForm.vue'
 import { useTaskStore } from '../../stores/taskStore'
+import { api } from '../../services/api'
 import type { Task } from '../../types/api'
 
 const store = useTaskStore()
@@ -26,6 +27,77 @@ const openEditModal = (task: Task) => {
 const closeEditModal = () => {
     showEditModal.value = false
     editingTask.value = null
+}
+
+// Run task manually
+const runningTasks = ref<Set<number>>(new Set())
+
+const runTaskNow = async (taskId: number) => {
+    if (runningTasks.value.has(taskId)) return
+    
+    runningTasks.value.add(taskId)
+    try {
+        const result = await api.runTaskNow(taskId)
+        if (result.success) {
+            alert(`任务 ${taskId} 已开始执行`)
+        } else {
+            alert(`任务执行失败: ${result.msg}`)
+        }
+    } catch (e: any) {
+        alert(`任务执行失败: ${e.message || '未知错误'}`)
+    } finally {
+        // Remove from running after a delay
+        setTimeout(() => {
+            runningTasks.value.delete(taskId)
+        }, 3000)
+    }
+}
+
+// Format schedule display
+const getScheduleDisplay = (task: Task) => {
+    if (task.schedule_mode === 'custom') {
+        const parts = []
+        if (task.custom_times && task.custom_times.length > 0) {
+            parts.push(`自定义: ${task.custom_times.join(', ')}`)
+        }
+        if (task.interval_hours && task.interval_hours > 0) {
+            parts.push(`每 ${task.interval_hours} 小时`)
+        }
+        return parts.length > 0 ? parts.join(' | ') : '未设置'
+    } else {
+        const slotNames: Record<string, string> = {
+            'first': '上午',
+            'second': '下午',
+            'third': '晚上',
+            'fourth': '凌晨'
+        }
+        if (task.time_slots && task.time_slots.length > 0) {
+            return task.time_slots.map(s => slotNames[s] || s).join(', ')
+        }
+        return '未设置'
+    }
+}
+
+// Format last run time
+const formatLastRun = (lastRun?: string) => {
+    if (!lastRun) return '从未运行'
+    try {
+        const date = new Date(lastRun)
+        const now = new Date()
+        const diffMs = now.getTime() - date.getTime()
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+        const diffMins = Math.floor(diffMs / (1000 * 60))
+        
+        if (diffMins < 60) {
+            return `${diffMins} 分钟前`
+        } else if (diffHours < 24) {
+            return `${diffHours} 小时前`
+        } else {
+            return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        }
+    } catch {
+        return lastRun
+    }
 }
 
 onMounted(() => {
@@ -88,7 +160,7 @@ onMounted(() => {
                     <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ task.title || '无标题任务' }} <span class="text-xs text-gray-400">(ID: {{ task.id }})</span></h3>
                     <div class="flex items-center mt-1 text-sm text-gray-500 dark:text-gray-400">
                         <Clock class="w-3.5 h-3.5 mr-1" />
-                        <span>上次运行: {{ task.last_run || '从未' }}</span>
+                        <span>{{ formatLastRun(task.last_run) }}</span>
                     </div>
                 </div>
                 <Badge :variant="task.activated ? 'success' : 'neutral'">
@@ -97,6 +169,11 @@ onMounted(() => {
             </div>
             
             <div class="space-y-3 mb-6">
+                 <!-- Schedule Info -->
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-500 dark:text-gray-400">调度</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100 text-right max-w-[200px] truncate" :title="getScheduleDisplay(task)">{{ getScheduleDisplay(task) }}</span>
+                </div>
                  <!-- Stats placeholder -->
                 <div class="flex items-center justify-between text-sm">
                     <span class="text-gray-500 dark:text-gray-400">来源数</span>
@@ -114,13 +191,22 @@ onMounted(() => {
             </div>
 
             <div class="flex items-center gap-2 pt-4 border-t border-gray-100 dark:border-gray-700">
-                <Button variant="ghost" size="sm" class="flex-1" @click="openEditModal(task)">
-                    <Edit2 class="w-4 h-4 mr-2" />
-                    编辑
+                <Button 
+                    variant="primary" 
+                    size="sm" 
+                    class="flex-1" 
+                    @click="runTaskNow(task.id)"
+                    :disabled="runningTasks.has(task.id)"
+                >
+                    <RefreshCw v-if="runningTasks.has(task.id)" class="w-4 h-4 mr-2 animate-spin" />
+                    <Zap v-else class="w-4 h-4 mr-2" />
+                    {{ runningTasks.has(task.id) ? '执行中...' : '立即运行' }}
                 </Button>
-                 <Button variant="ghost" size="sm" class="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20" @click="store.deleteTask(task.id)">
-                    <Trash2 class="w-4 h-4 mr-2" />
-                    删除
+                <Button variant="ghost" size="sm" @click="openEditModal(task)">
+                    <Edit2 class="w-4 h-4" />
+                </Button>
+                 <Button variant="ghost" size="sm" class="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20" @click="store.deleteTask(task.id)">
+                    <Trash2 class="w-4 h-4" />
                 </Button>
             </div>
         </div>

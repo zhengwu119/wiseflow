@@ -290,7 +290,8 @@ async def process_single_result(result, task_job_count, db_manager):
         if error_msg:
             await notify_user(0, list(error_msg))
 
-        task_id = await db_manager.update_task(task_id, status=task_job_count[task_id]['status'], errors=error_msg, 
+        task_id = await db_manager.update_task(task_id, status=task_job_count[task_id]['status'], errors=error_msg,
+                                               last_run=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                                                updated=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'))
         if task_id is None:
             wis_logger.warning(f"✗ 任务状态更新失败: {task_id}")
@@ -310,6 +311,167 @@ def run_time_slot_task_in_thread(time_slot: str):
     thread = threading.Thread(target=run_task, name=f"TimeSlot-{time_slot}")
     thread.daemon = True
     thread.start()
+
+async def execute_single_task(task_id: int):
+    """手动触发执行单个任务"""
+    db_manager = cache_manager = None
+    crawlers = {}
+    try:
+        # 1. 初始化资源
+        db_manager = AsyncDatabaseManager(logger=wis_logger)
+        await db_manager.initialize()
+        
+        # 2. 获取指定任务
+        all_tasks = await db_manager.list_tasks()
+        if not all_tasks:
+            wis_logger.warning(f"无法获取任务列表")
+            return
+            
+        task = next((t for t in all_tasks if t['id'] == task_id), None)
+        if not task:
+            wis_logger.warning(f"任务 {task_id} 不存在")
+            await notify_user(199, [f"任务 {task_id} 不存在"])
+            return
+        
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        wis_logger.info(f"手动执行任务 #{task_id} {task.get('title', '')} 开始于 {date_str}")
+        
+        focuses = task['focuses']
+        if not focuses:
+            wis_logger.warning(f"任务 {task_id} 未设定关注点，跳过")
+            await notify_user(199, [f"任务 {task_id} 未设定关注点"])
+            return
+        
+        sources = task['sources']
+        search = task['search']
+        
+        if not sources and not search:
+            await notify_user(6, [str(task_id)])
+            return
+        
+        # 3. 分析所需的平台
+        required_platforms = set()
+        required_platforms.update(search or [])
+        
+        for source in (sources or []):
+            if source.get('type'):
+                required_platforms.add(source['type'])
+        
+        if 'bing' in (search or []) or 'github' in (search or []):
+            required_platforms.add('web')
+        
+        # 4. 准备执行
+        crawlers = {platform: None for platform in required_platforms}
+        cache_manager = SqliteCache(db_path=MAIN_CACHE_FILE, default_namespace='articles')
+        await cache_manager.open()
+        
+        load_runtime_overrides()
+        
+        try:
+            await prepare_to_work(db_manager, cache_manager, crawlers)
+        except RuntimeError as e:
+            exp = str(e)
+            if exp in ['70', '13', '197', '198']:
+                await notify_user(int(exp) if exp in ['70', '13'] else 92 if exp == '197' else 93, 
+                                [date_str, 'manual', str(task_id)])
+            else:
+                wis_logger.warning(f"手动执行任务 {task_id} 准备失败: {e}")
+            return
+        except Exception as e:
+            wis_logger.warning(f"手动执行任务 {task_id} 启动检查失败: {e}")
+            await ask_user(199, [str(e)])
+            return
+        
+        await notify_user(2, [f"#{task_id} {task.get('title', '')}"])
+        await notify_user(25)
+        
+        from core.general_process import main_process
+        
+        # 计算 limit_hours
+        limit_hours = calculate_limit_hours(task.get('updated', ''))
+        
+        # 准备任务数据
+        task_job_count = {
+            task_id: {
+                'count': len(focuses), 
+                'status': 0, 
+                'msg': set(), 
+                'apply_count': 0, 
+                'total_processed': 0,
+                'crawl_failed': 0, 
+                'info_added': 0, 
+                'start_time': time.perf_counter()
+            }
+        }
+        
+        # 创建任务包装器
+        def create_task_wrapper(tid, focus, sources_copy, search_copy, lh, crawlers, db, cache):
+            async def wrapper():
+                status, msg, apply_count, recorder = await main_process(focus, sources_copy, search_copy, lh, crawlers, db, cache)
+                return tid, status, msg, apply_count, recorder
+            return asyncio.create_task(wrapper())
+        
+        jobs = []
+        for focus in focuses:
+            sources_copy = copy.deepcopy(sources) if sources else []
+            search_copy = copy.deepcopy(search) if search else []
+            random.shuffle(sources_copy)
+            random.shuffle(search_copy)
+            jobs.append(create_task_wrapper(task_id, focus, sources_copy, search_copy, limit_hours, 
+                                          crawlers, db_manager, cache_manager))
+        
+        # 5. 执行任务
+        wis_logger.info(f"手动任务 #{task_id} 拆解出 {len(jobs)} 个有效关注点，开始执行...")
+        
+        completed_count = 0
+        total_tasks = len(jobs)
+        
+        try:
+            async def process_completed_tasks():
+                nonlocal completed_count
+                for coro in asyncio.as_completed(jobs):
+                    try:
+                        result = await coro
+                        await process_single_result(result, task_job_count, db_manager)
+                    except asyncio.TimeoutError:
+                        raise
+                    except Exception as e:
+                        wis_logger.error(f"手动任务 #{task_id} 单个关注点处理错误: {e}")
+                    
+                    completed_count += 1
+                    if completed_count >= total_tasks:
+                        break
+            
+            await asyncio.wait_for(
+                process_completed_tasks(),
+                timeout=5*3600+50*60
+            )
+            
+        except asyncio.TimeoutError as e:
+            error_msg = str(e)
+            if "Critical account error" in error_msg or "Client version too low" in error_msg:
+                wis_logger.warning(f"⚠ 手动任务 #{task_id} 因账户错误终止执行: {error_msg}")
+            else:
+                wis_logger.warning(f"⚠ 手动任务 #{task_id} 执行超时")
+                await notify_user(26, [date_str, 'manual'])
+            
+            for job in jobs:
+                if not job.done():
+                    job.cancel()
+            await asyncio.gather(*[j for j in jobs if not j.done()], return_exceptions=True)
+        
+        # 更新 last_run 时间
+        await db_manager.update_task(task_id, last_run=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'))
+        
+        wis_logger.info(f"手动任务 #{task_id} 执行完成，共处理 {completed_count}/{total_tasks} 个关注点")
+        await notify_user(3, ['manual', str(completed_count), str(total_tasks)])
+        
+    except Exception as e:
+        wis_logger.error(f"✗ 手动任务 #{task_id} 执行失败: {e}")
+        await ask_user(199, [str(e)])
+    
+    finally:
+        await graceful_shutdown(crawlers, db_manager, cache_manager)
 
 async def graceful_shutdown(crawlers, db_manager, cache_manager):
     """优雅关闭：清理资源"""

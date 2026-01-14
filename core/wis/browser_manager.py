@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from patchright.async_api import async_playwright
 from patchright.async_api import ProxySettings
@@ -169,7 +170,7 @@ class BrowserManager:
 
         browser_args = {
             "user_data_dir": str(PERSISTENT_CONTEXT_DIR / config.context_marker),
-            "channel": "chrome",
+            "channel": os.environ.get("BROWSER_CHANNEL", "chrome"),
             "headless": self.config.headless,
             "no_viewport": False,
             "viewport": {"width": self.config.viewport_width, "height": self.config.viewport_height},

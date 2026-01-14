@@ -62,11 +62,18 @@ async def main_process(focus: dict,
     # 1. get the posts list from the sources (to parse more related urls)
     tasks = set()
     search_query = focuspoint or focus['restrictions']
+    wis_logger.info(f"[DEBUG] {focus_name} search list: {search}, crawlers keys: {list(crawlers.keys())}")
     for search_source in search:
+        wis_logger.info(f"[DEBUG] Processing search source: {search_source}")
         if search_source == 'github':
             tasks.add(wrap_task(search_with_github(search_query, existings['web'], cache_manager), ('posts', 'github')))
         elif search_source in ['bing', 'arxiv']:
-            tasks.add(wrap_task(search_with_engine(search_source, search_query, crawlers['web'], existings['web'], cache_manager),
+            web_crawler = crawlers.get('web')
+            wis_logger.info(f"[DEBUG] {search_source} needs web crawler, got: {web_crawler is not None}")
+            if not web_crawler:
+                wis_logger.warning(f"[DEBUG] No web crawler available for {search_source}, skipping!")
+                continue
+            tasks.add(wrap_task(search_with_engine(search_source, search_query, web_crawler, existings['web'], cache_manager),
                                 ('article_or_posts', search_source)))
         else:
             wis_logger.warning(f"{focus_name} has unvalid search source {search_source}, skip")

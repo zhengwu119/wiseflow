@@ -54,15 +54,15 @@ export const useTaskStore = defineStore('tasks', () => {
 
     async function updateTask(id: number, updates: Partial<TaskUpdateRequest>) {
         try {
-            // We need the full update object, but API allows partial if backend handles it? 
+            // We need the full update object, but API allows partial if backend handles it?
             // Backend update_task expects TaskUpdateRequest fields.
             // We should ideally merge with existing task data or just send what changed if backend supports it.
-            // Based on API docs, backend does "coverage write" (overwrite). 
+            // Based on API docs, backend does "coverage write" (overwrite).
             // So we should probably merge current task state with updates before sending.
             const current = tasks.value.find(t => t.id === id)
             if (!current) return
 
-            // Map Task to TaskUpdateRequest
+            // Map Task to TaskUpdateRequest - include all fields for complete update
             const req: TaskUpdateRequest = {
                 task_id: id,
                 title: updates.title ?? current.title,
@@ -70,7 +70,10 @@ export const useTaskStore = defineStore('tasks', () => {
                 search: updates.search ?? current.search,
                 sources: updates.sources ?? current.sources,
                 activated: updates.activated ?? current.activated,
-                time_slots: updates.time_slots ?? current.time_slots
+                schedule_mode: updates.schedule_mode ?? current.schedule_mode,
+                time_slots: updates.time_slots ?? current.time_slots,
+                custom_times: updates.custom_times ?? current.custom_times,
+                interval_hours: updates.interval_hours ?? current.interval_hours
             }
 
             const res = await api.updateTask(req)

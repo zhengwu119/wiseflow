@@ -1,4 +1,5 @@
 import hashlib
+import os
 from .config import config
 from .proxy_providers import ProxyProvider
 from typing import Union, List
@@ -6,6 +7,28 @@ import inspect
 from typing import Any, Dict, Optional
 from enum import Enum
 from .c4a_scripts import compile
+
+
+def _get_default_headless() -> bool:
+    """
+    Determine default headless mode based on environment.
+
+    Priority:
+    1. BROWSER_HEADLESS env var if set ("true"/"1" = True, "false"/"0" = False)
+    2. If no DISPLAY env var (common in Docker/server), default to True
+    3. Otherwise default to False (local development with display)
+    """
+    env_headless = os.environ.get("BROWSER_HEADLESS", "").lower()
+    if env_headless in ("true", "1"):
+        return True
+    if env_headless in ("false", "0"):
+        return False
+
+    # Auto-detect: if no DISPLAY, assume headless environment (Docker/server)
+    if not os.environ.get("DISPLAY"):
+        return True
+
+    return False
 
 
 def to_serializable_dict(obj: Any, ignore_default_value : bool = False) -> Dict:
@@ -176,7 +199,10 @@ class BrowserConfig:
 
     Attributes:
         headless (bool): Whether to run the browser in headless mode (no visible GUI).
-                         Default: True.
+                         Default: Auto-detected based on environment.
+                         - If BROWSER_HEADLESS env var is set: uses that value ("true"/"1" or "false"/"0")
+                         - If no DISPLAY env var (Docker/server): defaults to True
+                         - Otherwise (local with display): defaults to False
         viewport_width (int): Default viewport width for pages. Default: 1080.
         viewport_height (int): Default viewport height for pages. Default: 600.
         verbose (bool): Enable verbose logging.
@@ -195,7 +221,7 @@ class BrowserConfig:
 
     def __init__(
         self,
-        headless: bool = False,
+        headless: bool = None,
         viewport_width: int = config['VIEWPORT_WIDTH'],
         viewport_height: int = config['VIEWPORT_HEIGHT'],
         accept_downloads: bool = False,
@@ -207,7 +233,8 @@ class BrowserConfig:
         text_mode: bool = False,
         extra_args: list = None,
     ):
-        self.headless = headless 
+        # Use environment-aware default if headless not explicitly set
+        self.headless = headless if headless is not None else _get_default_headless()
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
         self.accept_downloads = accept_downloads
@@ -222,7 +249,7 @@ class BrowserConfig:
     @staticmethod
     def from_kwargs(kwargs: dict) -> "BrowserConfig":
         return BrowserConfig(
-            headless=kwargs.get("headless", True),
+            headless=kwargs.get("headless"),  # None triggers auto-detection
             viewport_width=kwargs.get("viewport_width", config['VIEWPORT_WIDTH']),
             viewport_height=kwargs.get("viewport_height", config['VIEWPORT_HEIGHT']),
             accept_downloads=kwargs.get("accept_downloads", False),

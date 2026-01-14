@@ -73,10 +73,14 @@ class UserIdRequest(BaseModel):
 ALLOWED_SEARCH = {"bing", "github", "arxiv"}
 ALLOWED_SOURCE_TYPES = {"web", "rss"}
 ALLOWED_TIME_SLOTS = {'first', 'second', 'third', 'fourth'}
+ALLOWED_SCHEDULE_MODES = {'slots', 'custom'}
 
 def _validate_task_inputs(search: Optional[List[str]] = None,
                           sources: Optional[List[Dict]] = None,
-                          time_slots: Optional[List[str]] = None) -> Optional[str]:
+                          time_slots: Optional[List[str]] = None,
+                          schedule_mode: Optional[str] = None,
+                          custom_times: Optional[List[str]] = None,
+                          interval_hours: Optional[int] = None) -> Optional[str]:
     # search 校验
     if search is not None:
         if not isinstance(search, list) or any(not isinstance(s, str) for s in search):
@@ -110,6 +114,30 @@ def _validate_task_inputs(search: Optional[List[str]] = None,
             if t not in ALLOWED_TIME_SLOTS:
                 return f"time_slots 包含非法值: {t}"
 
+    # schedule_mode 校验
+    if schedule_mode is not None:
+        if schedule_mode not in ALLOWED_SCHEDULE_MODES:
+            return f"schedule_mode 非法: {schedule_mode}，必须为 'slots' 或 'custom'"
+
+    # custom_times 校验 (格式为 HH:MM)
+    if custom_times is not None:
+        if not isinstance(custom_times, list):
+            return "custom_times 必须为列表"
+        import re
+        time_pattern = re.compile(r'^([01]?\d|2[0-3]):([0-5]\d)$')
+        for ct in custom_times:
+            if not isinstance(ct, str):
+                return "custom_times 列表元素必须为字符串"
+            if not time_pattern.match(ct):
+                return f"custom_times 包含非法时间格式: {ct}，必须为 HH:MM 格式"
+
+    # interval_hours 校验
+    if interval_hours is not None:
+        if not isinstance(interval_hours, (int, float)):
+            return "interval_hours 必须为数字"
+        if interval_hours < 0:
+            return "interval_hours 不能为负数"
+
     return None
 
 
@@ -118,7 +146,10 @@ class TaskRequest(BaseModel):
     search: Optional[List[str]] = None  # bing、github、arxiv
     sources: List[Dict] = []  # type: web/rss, detail: List[str]
     activated: Optional[bool] = True
-    time_slots: Optional[List[str]] = None  # morning、afternoon、evening、dawn
+    schedule_mode: Optional[str] = "slots"  # 'slots' | 'custom'
+    time_slots: Optional[List[str]] = None  # first、second、third、fourth
+    custom_times: Optional[List[str]] = None  # ["08:30", "14:00"]
+    interval_hours: Optional[int] = 0  # 间隔小时数
     title: Optional[str] = None  # 任务标题，可选
 
 
@@ -128,7 +159,10 @@ class TaskUpdateRequest(BaseModel):
     search: Optional[List[str]] = None
     sources: Optional[List[Dict]] = None
     activated: Optional[bool] = None
+    schedule_mode: Optional[str] = None
     time_slots: Optional[List[str]] = None
+    custom_times: Optional[List[str]] = None
+    interval_hours: Optional[int] = None
     title: Optional[str] = None
 
 
@@ -202,7 +236,10 @@ async def add_task(request: TaskRequest):
     error = _validate_task_inputs(
         search=request.search if request.search is not None else [],
         sources=request.sources or [],
-        time_slots=request.time_slots if request.time_slots is not None else []
+        time_slots=request.time_slots if request.time_slots is not None else [],
+        schedule_mode=request.schedule_mode,
+        custom_times=request.custom_times if request.custom_times is not None else [],
+        interval_hours=request.interval_hours
     )
     if error:
         return APIResponse(success=False, msg=error, data=None)
@@ -212,7 +249,10 @@ async def add_task(request: TaskRequest):
         search=request.search or [],
         sources=request.sources or [],
         activated=request.activated if request.activated is not None else True,
+        schedule_mode=request.schedule_mode or "slots",
         time_slots=request.time_slots or [],
+        custom_times=request.custom_times or [],
+        interval_hours=request.interval_hours or 0,
         title=(request.title or "").strip(),
     )
         
@@ -242,8 +282,14 @@ async def update_task(request: TaskUpdateRequest):
         update_fields['sources'] = request.sources
     if request.activated is not None:
         update_fields['activated'] = request.activated
+    if request.schedule_mode is not None:
+        update_fields['schedule_mode'] = request.schedule_mode
     if request.time_slots is not None:
         update_fields['time_slots'] = request.time_slots
+    if request.custom_times is not None:
+        update_fields['custom_times'] = request.custom_times
+    if request.interval_hours is not None:
+        update_fields['interval_hours'] = request.interval_hours
     if request.title is not None:
         update_fields['title'] = request.title
     
@@ -251,7 +297,10 @@ async def update_task(request: TaskUpdateRequest):
     error = _validate_task_inputs(
         search=update_fields.get('search', None),
         sources=update_fields.get('sources', None),
-        time_slots=update_fields.get('time_slots', None)
+        time_slots=update_fields.get('time_slots', None),
+        schedule_mode=update_fields.get('schedule_mode', None),
+        custom_times=update_fields.get('custom_times', None),
+        interval_hours=update_fields.get('interval_hours', None)
     )
     if error:
         return APIResponse(success=False, msg=error, data=None)
@@ -274,6 +323,50 @@ async def clear_task_errors(task_id: int):
         return APIResponse(success=True, msg="", data=result)
     else:
         return APIResponse(success=False, msg=f"清除任务 {task_id} 错误信息失败", data=None)
+
+# 28. run_task_now - 手动触发任务执行
+@app.post("/run_task")
+async def run_task_now(task_id: int):
+    """
+    立即执行指定任务（手动触发）
+    这将在后台线程中异步执行任务，不会阻塞 API 响应
+    """
+    import threading
+    import asyncio
+    
+    # 检查任务是否存在
+    tasks = await db_manager.list_tasks()
+    if tasks is None:
+        return APIResponse(success=False, msg="获取任务列表失败", data=None)
+    
+    task = next((t for t in tasks if t['id'] == task_id), None)
+    if task is None:
+        return APIResponse(success=False, msg=f"任务 {task_id} 不存在", data=None)
+    
+    # 检查任务是否有 focuses
+    if not task.get('focuses'):
+        return APIResponse(success=False, msg=f"任务 {task_id} 没有设置关注点，无法执行", data=None)
+    
+    def run_single_task():
+        """在新线程中执行任务"""
+        loop = None
+        try:
+            from core.run_task import execute_single_task
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(execute_single_task(task_id))
+        except Exception as e:
+            logger.error(f"手动执行任务 {task_id} 失败: {e}")
+        finally:
+            if loop is not None:
+                loop.close()
+    
+    # 在后台线程中执行任务
+    thread = threading.Thread(target=run_single_task, name=f"ManualTask-{task_id}")
+    thread.daemon = True
+    thread.start()
+    
+    return APIResponse(success=True, msg=f"任务 {task_id} 已开始执行", data=task_id)
 
 # 7. read_focus
 @app.get("/read_focus")

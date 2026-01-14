@@ -64,8 +64,16 @@ class AsyncDatabaseManager:
             'sources': 'JSON DEFAULT "[]"', # type 是 TEXT，只能从如下单选："web", "rss"
             # 任务控制选项
             'activated': 'BOOLEAN DEFAULT 1',
-            # 对应工作时间，是一个列表，只能从如下多选：first, second, third, fourth
+            # 调度模式: 'slots' (时间段模式) 或 'custom' (自定义调度模式)
+            'schedule_mode': 'TEXT DEFAULT "slots"',
+            # 时间段模式：对应工作时间，是一个列表，只能从如下多选：first, second, third, fourth
             'time_slots': 'JSON DEFAULT "[]"',
+            # 自定义调度模式：自定义运行时间列表，格式 ["08:30", "14:00", "20:00"]
+            'custom_times': 'JSON DEFAULT "[]"',
+            # 自定义调度模式：间隔时间（小时），0 表示不使用间隔调度
+            'interval_hours': 'NUMERIC DEFAULT 0',
+            # 上次运行时间 (ISO 8601 格式)
+            'last_run': 'TEXT',
             # 任务标题
             'title': 'TEXT DEFAULT ""',
             # status，对应状态，int。0：正常，2：存在无法进行的错误， 系统会跳过，除非状态码改变，1：存在需要提醒用户解决的错误，但系统会执行
@@ -121,6 +129,7 @@ class AsyncDatabaseManager:
     ALLOWED_SEARCH = {"bing", "github", "arxiv"}
     ALLOWED_SOURCE_TYPES = {"web", "rss"}
     ALLOWED_TIME_SLOTS = {'first', 'second', 'third', 'fourth'}
+    ALLOWED_SCHEDULE_MODES = {'slots', 'custom'}
     
     def __init__(self, pool_size: int = 6, max_retries: int = 3, logger = None):
         self.db_path = base_directory / "data.db"
@@ -743,7 +752,9 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             return {}
     
     # ---------------------- tasks CRUD ----------------------
-    def _validate_task_inputs(self, search: list | None, sources: list | None, time_slots: list | None) -> str | None:
+    def _validate_task_inputs(self, search: list | None, sources: list | None, time_slots: list | None,
+                              schedule_mode: str | None = None, custom_times: list | None = None,
+                              interval_hours: int | None = None) -> str | None:
         """校验任务字段值是否合法，非法返回错误信息字符串，合法返回 None"""
         # search 校验
         if search is not None:
@@ -778,6 +789,30 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             for t in time_slots:
                 if t not in self.ALLOWED_TIME_SLOTS:
                     return f"time_slots 包含非法值: {t}"
+
+        # schedule_mode 校验
+        if schedule_mode is not None:
+            if schedule_mode not in self.ALLOWED_SCHEDULE_MODES:
+                return f"schedule_mode 非法: {schedule_mode}，必须为 'slots' 或 'custom'"
+
+        # custom_times 校验 (格式为 HH:MM)
+        if custom_times is not None:
+            if not isinstance(custom_times, list):
+                return "custom_times 必须为列表"
+            import re
+            time_pattern = re.compile(r'^([01]?\d|2[0-3]):([0-5]\d)$')
+            for ct in custom_times:
+                if not isinstance(ct, str):
+                    return "custom_times 列表元素必须为字符串"
+                if not time_pattern.match(ct):
+                    return f"custom_times 包含非法时间格式: {ct}，必须为 HH:MM 格式"
+
+        # interval_hours 校验
+        if interval_hours is not None:
+            if not isinstance(interval_hours, (int, float)):
+                return "interval_hours 必须为数字"
+            if interval_hours < 0:
+                return "interval_hours 不能为负数"
 
         return None
     
@@ -874,6 +909,9 @@ CREATE TABLE IF NOT EXISTS {table_name} (
                        sources: list = None,
                        activated: bool = True,
                        time_slots: list = None,
+                       schedule_mode: str = "slots",
+                       custom_times: list = None,
+                       interval_hours: int = 0,
                        title: str = "",
                        status: int = 0,
                        errors: set = None) -> Optional[int]:
@@ -884,12 +922,18 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             focuses: focus 列表，每个元素可以是：
                     - dict: 包含 focuspoint, restrictions, explanation, role, purpose, custom_schema，会创建新的 focus 记录
                     - int: 现有的 focus id
+            schedule_mode: 调度模式，'slots' (时间段模式) 或 'custom' (自定义调度模式)
+            custom_times: 自定义运行时间列表，格式 ["08:30", "14:00"]
+            interval_hours: 间隔时间（小时），0 表示不使用间隔调度
         """
         # 字段校验（先于任何数据库写入）
         error_msg = self._validate_task_inputs(
             search=search or [],
             sources=sources or [],
-            time_slots=time_slots or []
+            time_slots=time_slots or [],
+            schedule_mode=schedule_mode,
+            custom_times=custom_times or [],
+            interval_hours=interval_hours or 0
         )
         if error_msg:
             self.logger.warning(f"add_task 参数非法: {error_msg}")
@@ -932,15 +976,18 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         async def _add(db):
             cursor = await db.execute(
                 """
-                INSERT INTO tasks (focuses, search, sources, activated, time_slots, title, status, errors, updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO tasks (focuses, search, sources, activated, schedule_mode, time_slots, custom_times, interval_hours, title, status, errors, updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self._serialize_json(list(focus_ids), default_as_list=True),  # 存储 focus_ids 而不是原始 focuses
                     self._serialize_json(search or [], default_as_list=True),
                     self._serialize_json(processed_sources, default_as_list=True),
                     1 if activated else 0,
+                    schedule_mode or "slots",
                     self._serialize_json(time_slots or [], default_as_list=True),
+                    self._serialize_json(custom_times or [], default_as_list=True),
+                    interval_hours or 0,
                     (title or "").strip(),
                     status or 0,
                     errors_str,
@@ -959,7 +1006,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         result: List[dict] = []
 
         async def _list(db):
-            base = "SELECT id, focuses, search, sources, activated, time_slots, title, status, errors, updated FROM tasks"
+            base = "SELECT id, focuses, search, sources, activated, schedule_mode, time_slots, custom_times, interval_hours, last_run, title, status, errors, updated FROM tasks"
             query = base + (" WHERE activated = 1" if only_activated else "") + " ORDER BY id DESC"
             async with db.execute(query) as cursor:
                 rows = await cursor.fetchall()
@@ -971,6 +1018,11 @@ CREATE TABLE IF NOT EXISTS {table_name} (
                     item['search'] = self._deserialize_json(item.get('search', '[]'), default_as_list=True)
                     sources = self._deserialize_json(item.get('sources', '[]'), default_as_list=True)
                     item['time_slots'] = self._deserialize_json(item.get('time_slots', '[]'), default_as_list=True)
+                    item['custom_times'] = self._deserialize_json(item.get('custom_times', '[]'), default_as_list=True)
+                    
+                    # 处理调度相关字段
+                    item['schedule_mode'] = item.get('schedule_mode') or 'slots'
+                    item['interval_hours'] = item.get('interval_hours') or 0
                     
                     # 规范化 sources：确保每个 source 的 detail 是列表格式（兼容旧数据）
                     normalized_sources = []
@@ -1016,24 +1068,31 @@ CREATE TABLE IF NOT EXISTS {table_name} (
 
     async def update_task(self, task_id: int, **fields) -> Optional[int]:
         """
-        更新 task，自动刷新 updated。支持的字段：focuses, search, sources, activated, time_slots, status, errors
+        更新 task，自动刷新 updated。支持的字段：focuses, search, sources, activated, time_slots, schedule_mode, custom_times, interval_hours, last_run, status, errors
         
         Args:
             focuses: focus 列表，每个元素可以是：
                     - dict: 包含 focuspoint, restrictions, explanation, role, purpose, custom_schema，会创建新的 focus 记录
                     - int: 现有的 focus id
+            schedule_mode: 调度模式，'slots' 或 'custom'
+            custom_times: 自定义运行时间列表
+            interval_hours: 间隔时间（小时）
+            last_run: 上次运行时间
             errors: 错误信息集合，set 类型
         """
         if not task_id:
             return None
-        allowed = {"focuses", "search", "sources", "activated", "time_slots", "title", "status", "errors", "updated"}
+        allowed = {"focuses", "search", "sources", "activated", "time_slots", "schedule_mode", "custom_times", "interval_hours", "last_run", "title", "status", "errors", "updated"}
         updates = {}
         
         # 仅校验用户传入的字段
         validation_error = self._validate_task_inputs(
             search=fields.get('search', None),
             sources=fields.get('sources', None),
-            time_slots=fields.get('time_slots', None)
+            time_slots=fields.get('time_slots', None),
+            schedule_mode=fields.get('schedule_mode', None),
+            custom_times=fields.get('custom_times', None),
+            interval_hours=fields.get('interval_hours', None)
         )
         if validation_error:
             self.logger.warning(f"update_task 参数非法: {validation_error}")
@@ -1077,7 +1136,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
                 # 特殊处理 sources 字段：对 type 为 'web' 的条目使用 extract_urls 处理
                 processed_sources = self._process_web_sources(v)
                 updates[k] = self._serialize_json(processed_sources, default_as_list=True)
-            elif k in {"search", "time_slots"}:
+            elif k in {"search", "time_slots", "custom_times"}:
                 updates[k] = self._serialize_json(v or [], default_as_list=True)
             elif k == "activated":
                 updates[k] = 1 if v else 0
@@ -1088,6 +1147,10 @@ CREATE TABLE IF NOT EXISTS {table_name} (
                 else:
                     updates['errors'] = ""
                     updates['status'] = 0
+            elif k == "interval_hours":
+                updates[k] = int(v) if v else 0
+            elif k in {"schedule_mode", "last_run", "title", "status", "updated"}:
+                updates[k] = v
             else:
                 updates[k] = v
 

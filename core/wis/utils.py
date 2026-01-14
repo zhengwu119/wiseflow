@@ -20,6 +20,42 @@ from itertools import chain
 from urllib.parse import urlparse, urljoin, urlunparse, parse_qs, urlencode
 
 
+def extract_xml_data(tags, string):
+    """
+    Extract data for specified XML tags from a string, returning the longest content for each tag.
+
+    How it works:
+    1. Finds all occurrences of each tag in the string using regex.
+    3. Returns a dictionary of tag-content pairs.
+
+    Args:
+        tags (List[str]): The list of XML tags to extract.
+        string (str): The input string containing XML data.
+
+    Returns:
+        Dict[str, str]: A dictionary with tag names as keys and longest extracted content as values.
+    """
+
+    if '</think>' in string:
+        string = string.split('</think>')[1]
+
+    data = {}
+
+    for tag in tags:
+        pattern = f"<{tag}>(.*?)</{tag}>"
+        matches = re.findall(pattern, string, re.DOTALL)
+
+        if matches:
+            # Find the longest content for this tag
+            # longest_content = max(matches, key=len).strip()
+            # 改为返回所有匹配
+            data[tag] = matches
+        else:
+            data[tag] = []
+
+    return data
+
+
 common_file_exts = [
     '.css', '.csv', '.ics', '.js',
     # Images

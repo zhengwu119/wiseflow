@@ -40,14 +40,18 @@ async def search_with_engine(engine: str,
     """
     # --- locate engine implementation ------------------------------------------------
     search_results = []
+    wis_logger.info(f"[{engine}] search_with_engine called, query='{query}', cache_manager={cache_manager is not None}")
     if cache_manager:
         search_results = await cache_manager.get(query, namespace=engine)
+        wis_logger.info(f"[{engine}] cache result: {type(search_results).__name__}, value={search_results if isinstance(search_results, str) else f'list({len(search_results) if search_results else 0})'}")
         if search_results == '**empty**':
+            wis_logger.info(f"[{engine}] cache hit with **empty** marker, returning early")
             return [], "", {}
-        
+
     if not search_results:
+        wis_logger.info(f"[{engine}] no cache hit, fetching from source...")
         try:
-            engine_module = importlib.import_module(f"wis.searchengines.engines.{engine}")
+            engine_module = importlib.import_module(f"core.wis.searchengines.engines.{engine}")
         except ImportError as e:
             wis_logger.error(f"Engine '{engine}' not found: {e}")
             return [], "", {}
@@ -79,15 +83,32 @@ async def search_with_engine(engine: str,
 
         elif engine == "bing":
             url = engine_module.gen_query_url(query, **kwargs)
+            wis_logger.info(f"[bing] crawling URL: {url}")
             result = await crawler.arun(url)
             if not result or not result.success:
-                wis_logger.warning(f"Search with Engine '{engine}', query '{query}', due to crawler, failed")
+                wis_logger.warning(f"Search with Engine '{engine}', query '{query}', due to crawler, failed. result={result}")
                 await notify_user(15, ['bing'])
                 return [], "", {}
+            wis_logger.info(f"[bing] crawler success, html length: {len(result.html) if result.html else 0}")
+            # Debug: find and print the b_results section
+            if result.html and 'b_results' in result.html:
+                start_idx = result.html.find('id="b_results"')
+                if start_idx > 0:
+                    # Print 8000 chars starting from b_results
+                    preview = result.html[start_idx:start_idx+8000]
+                    wis_logger.info(f"[bing] b_results section (8000 chars):\n{preview}")
+                else:
+                    wis_logger.info(f"[bing] b_results found but couldn't locate id attribute")
             html = result.html
 
         search_results = engine_module.parse_response(html)
-        wis_logger.debug(f"from {engine} got {len(search_results)} search_results")
+        wis_logger.info(f"[{engine}] parsed {len(search_results)} search results")
+        # Debug: print parsed results (use info level)
+        if search_results:
+            for i, res in enumerate(search_results[:5]):  # Print first 5 results
+                wis_logger.info(f"[{engine}] result[{i}]: url={res.get('url', 'N/A')[:100]}, title={res.get('title', 'N/A')[:80]}")
+        else:
+            wis_logger.warning(f"[{engine}] No results parsed! HTML contains 'b_results': {'b_results' in html if html else False}, 'b_algo': {'b_algo' in html if html else False}")
         if cache_manager:
             await cache_manager.set(query, search_results, 60*24, namespace=engine)
 

@@ -1,0 +1,46 @@
+services:
+  # 后端服务 - Python FastAPI
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: wiseflow-backend
+    ports:
+      - "8077:8077"
+    environment:
+      - WISEFLOW_BACKEND_HOST=0.0.0.0
+      - WISEFLOW_BACKEND_PORT=8077
+      - WISEFLOW_DISABLE_TASKS=0  # 启用定时任务调度器
+      - BROWSER_CHANNEL=chromium  # ARM64 兼容
+      - BROWSER_HEADLESS=true  # Docker 环境必须使用 headless 模式
+    env_file:
+      - .env
+    volumes:
+      - ./work_dir:/app/work_dir
+      - ./core:/app/core  # 实时代码更新
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8077/list_config"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # 前端服务 - Nginx 静态服务
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://backend:8077
+    container_name: wiseflow-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: wiseflow-network
