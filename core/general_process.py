@@ -182,21 +182,23 @@ async def main_process(focus: dict,
     # use asyncio loop to crawl the urls -- get articles -- add to to_scrap_articles..
     while not recorder.finished():
         if recorder.article_queue:
+            wis_logger.info(f"[STEP] {focus_name} 开始AI提取 {len(recorder.article_queue)} 篇文章")
             scraper_tasks = [wrap_task(extractor(article=article), article) for article in recorder.article_queue]
             for coro in asyncio.as_completed(scraper_tasks):
                 recorder.total_processed += 1
                 article, success, result_or_exception = await coro
+                article_url = article.url if hasattr(article, 'url') else "unknown"
                 if not success:
                     if result_or_exception in ['99', '97', '98', '88', '91']:
                         return int(result_or_exception), warning_msg, extractor.apply_count, recorder
-                    article_url = article.url if hasattr(article, 'url') else "unknown"
-                    wis_logger.info(f"[EXTRACT] ✗ failed to process article: {article_url}: {result_or_exception}")
+                    wis_logger.info(f"[EXTRACT] ✗ AI提取失败: {article_url}, 原因: {result_or_exception}")
                     await notify_user(89, [f"Extractor Error When processing {article_url}: {result_or_exception}"])
                     recorder.scrap_failed += 1
                     continue
-                
+
                 info_found, related_links = result_or_exception
-                
+                wis_logger.info(f"[EXTRACT] ✓ AI提取成功: {article_url[:50]}..., 发现 {info_found} 条信息, {len(related_links)} 个相关链接")
+
                 recorder.add_url(related_links - existings['web'], 'article')
                 recorder.info_added += info_found
                 recorder.successed += 1
@@ -209,12 +211,16 @@ async def main_process(focus: dict,
             recorder.article_queue = []
 
         if recorder.url_queue:
-            wis_logger.debug(f"{focus_name} still have {len(recorder.url_queue)} urls to crawl")
+            wis_logger.info(f"[STEP] {focus_name} 开始爬取 {len(recorder.url_queue)} 个URL")
             if crawlers.get('web'):
                 async for result in await crawlers['web'].arun_many(list(recorder.url_queue)):
                     if result and result.success:
+                        wis_logger.info(f"[CRAWL] ✓ 爬取成功: {result.url[:50]}...")
                         recorder.article_queue.append(result)
                     else:
+                        error_info = result.error_message if result else "无返回结果"
+                        failed_url = result.url if result else "unknown"
+                        wis_logger.warning(f"[CRAWL] ✗ 爬取失败: {failed_url}, 原因: {error_info}")
                         recorder.crawl_failed += 1
                         recorder.total_processed += 1
             else:

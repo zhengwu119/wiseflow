@@ -168,9 +168,9 @@ class AsyncWebCrawler:
                 if success:
                     wis_logger.debug(f"[FETCH] ✓ {url:.30}... | ⏱: {t2 - t1:.2f}s")
                 else:
-                    wis_logger.info(f"[FETCH] ✗ {url} | ⏱: {t2 - t1:.2f}s")
+                    wis_logger.info(f"[FETCH] ✗ 获取失败: {url} | 状态码: {async_response.status_code} | ⏱: {t2 - t1:.2f}s")
             except Exception as e:
-                wis_logger.error(f"[Crawl Failed] {url}\n{str(e)}")
+                wis_logger.error(f"[CRAWL] ✗ 爬取异常: {url}\n错误类型: {type(e).__name__}\n错误详情: {str(e)}")
                 return CrawlResult(
                     url=url, html="", success=False, error_message=str(e)
                 )

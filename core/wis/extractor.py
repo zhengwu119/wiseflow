@@ -61,14 +61,17 @@ async def info_process(info_blocks:list[str],
             publish_date = publish_date.split('T')[0]
         info_prefix = f'//{author} {publish_date}//' if (author or publish_date) else ''
 
-    for block in info_blocks:
+    wis_logger.debug(f"[INFO_PROCESS] 开始处理 {len(info_blocks)} 个信息块")
+    for i, block in enumerate(info_blocks):
         block = block.strip()
         if len(block) < 3:
+            wis_logger.debug(f"[INFO_PROCESS] 块{i+1} 被跳过: 内容过短({len(block)}字符)")
             continue
 
         # bad case sellections
         block = block.removeprefix('根据提供的信息，').strip()
         if block.startswith(('无相关信息', '没有找到', '未找到', '无法提取', '没有发现')):
+            wis_logger.info(f"[INFO_PROCESS] 块{i+1} 被跳过: LLM表示无相关信息, 内容: {block[:50]}...")
             continue
 
         url_tags = re.findall(r'\[(?:img)?\d+]', block)
@@ -178,12 +181,14 @@ class ExtractManager:
         cleaned_html = kwargs.get('cleaned_html', article.cleaned_html if article else None)
         metadata = kwargs.get('metadata', article.metadata if article else {})
 
+        wis_logger.debug(f"[EXTRACT] 开始处理: {url[:50] if url else 'unknown'}..., mode={mode}")
+
         if mode == 'only_link' and config['EXCLUDE_EXTERNAL_LINKS'] and "mp.weixin.qq.com" in url:
             return 0, set()
     
         if not markdown:
             if not html and not cleaned_html:
-                wis_logger.info(f"[HTML TO MARKDOWN] ✗ {url} no markdown, cleaned_html or html, skip")
+                wis_logger.info(f"[EXTRACT] ✗ HTML转Markdown失败: {url} 无markdown、cleaned_html或html内容")
                 await self.cache_manager.delete(url)
                 return 0, set()
             
@@ -204,12 +209,12 @@ class ExtractManager:
             
             error_msg, ps_title, ps_author, publish, markdown, link_dict = result
             if error_msg:
-                wis_logger.warning(f"[HTML TO MARKDOWN] ✗ {url}\n{error_msg}")
+                wis_logger.warning(f"[EXTRACT] ✗ HTML转Markdown失败: {url}, 错误: {error_msg}")
                 return 0, set()
-            
+
             if not markdown:
                 # 大概率抓取那个环节其实失败了
-                wis_logger.warning(f"[HTML TO MARKDOWN] ✗ {url} cannot get content, possibly failed on crawling")
+                wis_logger.warning(f"[EXTRACT] ✗ HTML转Markdown失败: {url} 无法获取内容，可能爬取环节已失败")
                 await self.cache_manager.delete(url)
                 return 0, set()
             
@@ -241,6 +246,7 @@ class ExtractManager:
             mode = 'only_info'
         
         sections = _chunker.chunk(markdown)
+        wis_logger.debug(f"[EXTRACT] 内容分块完成: {url[:50] if url else 'unknown'}..., 共 {len(sections)} 个分块")
         infos = []
         link_blocks = []
         # custom_schema_blocks = []
@@ -262,12 +268,14 @@ class ExtractManager:
             mode = 'only_info'
 
         for section in sections:
+            wis_logger.debug(f"[EXTRACT] 处理分块, 长度: {len(section)} 字符")
             content_hash = await asyncio.get_event_loop().run_in_executor(
                 None,  # 使用默认线程池
                 hash_calculate,
                 section
             )
             if not content_hash:
+                wis_logger.info(f"[EXTRACT] 分块内容过短被跳过, 长度: {len(section)} 字符")
                 continue
 
             # 从缓存中检查该内容是否已经被当前focus_id处理过
@@ -304,12 +312,13 @@ class ExtractManager:
                     try:
                         result = extract_xml_data(["links"], llm_response.choices[0].message.content)
                         sec_link_blocks.extend(result.get("links"))
+                        wis_logger.debug(f"[EXTRACT] LLM链接提取成功, 发现 {len(result.get('links', []))} 个链接块")
                     except Exception as e:
                         _msg = f"link result parse error: {e}"
                         wis_logger.error(_msg)
                 else:
                     _msg = "LLM Service Temporarily Unavailable"
-                    wis_logger.error(_msg)
+                    wis_logger.error(f"[EXTRACT] ✗ LLM调用失败: {_msg}")
             else:
                 if self.schema:
                     model = performance_model # for this stage
@@ -337,6 +346,7 @@ class ExtractManager:
                         try:
                             result = extract_xml_data(["json"], llm_response.choices[0].message.content)
                             sec_infos = await info_process(result.get("json", []), 'schema', url, title, author, publish_date, link_dict, markdown)
+                            wis_logger.debug(f"[EXTRACT] LLM schema提取成功, 发现 {len(sec_infos)} 条信息")
                         except Exception as e:
                             _msg = f"custom schema result parse error: {e}"
                             wis_logger.error(_msg)
@@ -348,13 +358,16 @@ class ExtractManager:
                                 result = extract_xml_data(["info", "links"], llm_response.choices[0].message.content)
                                 sec_link_blocks.extend(result.get("links"))
 
-                            sec_infos = await info_process(result.get("info", []), 'journal', url, title, author, publish_date, link_dict, markdown)
+                            raw_info = result.get("info", [])
+                            wis_logger.info(f"[EXTRACT] LLM原始返回: info数量={len(raw_info)}, 内容预览={str(raw_info)[:200] if raw_info else '空'}")
+                            sec_infos = await info_process(raw_info, 'journal', url, title, author, publish_date, link_dict, markdown)
+                            wis_logger.info(f"[EXTRACT] info_process处理后: {len(sec_infos)} 条有效信息")
                         except Exception as e:
                             _msg = f"info result parse error: {e}"
                             wis_logger.error(_msg)
                 else:
                     _msg = "LLM Service Tempetally Unavailable"
-                    wis_logger.error(_msg)
+                    wis_logger.error(f"[EXTRACT] ✗ LLM调用失败: {_msg}")
                 
                 if VERBOSE:
                     print("=== Token Usage Summary ===")
@@ -365,6 +378,7 @@ class ExtractManager:
             self.apply_count += 1
             if not sec_infos and not sec_link_blocks:
                 self.apply_failed += 1
+                wis_logger.info(f"[EXTRACT] LLM返回空结果, apply_failed: {self.apply_failed}/{APLPLY_FAILED_TIMES_THRESHOLD}")
                 # 要把缓存中的记录删掉
                 await self.cache_manager.delete(cache_key, namespace=cache_namespace)
                 if self.apply_failed >= APLPLY_FAILED_TIMES_THRESHOLD:
@@ -392,8 +406,9 @@ class ExtractManager:
                 f"[QualityAssessment] Focus {self.focus_id} - link extraction, hallucination times: {hallucination_times}, hallucination rate: {hallucination_rate} %")
         
         if mode == 'only_link':
+            wis_logger.debug(f"[EXTRACT] 完成(only_link模式): {url[:50] if url else 'unknown'}..., 返回 {len(more_links)} 个链接")
             return 0, more_links
-        
+
         # 解析 infos 存储过程，注意过滤 **empty** 和 空内容
         info_count = 0
         for info in infos:
@@ -422,7 +437,8 @@ class ExtractManager:
         # 根据抽取结果判断是否需要缓存（作为信源级已经缓存5h了，这里其实是判断这是文章页还是列表页，标准是提取出 info 且提取出的links 不超过5个）：
         if (mode == 'only_info' or (info_count > 0 and len(more_links) < 5)) and markdown and url:
             await self.cache_manager.update_ttl(url, 60*24*config['WEB_ARTICLE_TTL'])
-        
+
+        wis_logger.info(f"[EXTRACT] 完成: {url[:50] if url else 'unknown'}..., 提取 {info_count} 条信息, {len(more_links)} 个相关链接")
         return info_count, more_links
 
     def _parse_custom_schema_block(self, schema_block: str) -> str:
