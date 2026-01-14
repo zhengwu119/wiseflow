@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { Plus, Play, Trash2, Edit2, Clock, Database, Zap, RefreshCw } from 'lucide-vue-next'
+import { ref, onMounted, computed } from 'vue'
+import { Plus, Play, Trash2, Edit2, Clock, Database, Zap, RefreshCw, FileText } from 'lucide-vue-next'
 import Button from '../../components/ui/Button.vue'
 import Card from '../../components/ui/Card.vue'
 import Badge from '../../components/ui/Badge.vue'
@@ -8,7 +8,10 @@ import Modal from '../../components/ui/Modal.vue'
 import TaskForm from './TaskForm.vue'
 import { useTaskStore } from '../../stores/taskStore'
 import { api } from '../../services/api'
+import { useToast } from '../../composables/useToast'
 import type { Task } from '../../types/api'
+
+const toast = useToast()
 
 const store = useTaskStore()
 const showCreateModal = ref(false)
@@ -39,12 +42,12 @@ const runTaskNow = async (taskId: number) => {
     try {
         const result = await api.runTaskNow(taskId)
         if (result.success) {
-            alert(`任务 ${taskId} 已开始执行`)
+            toast.success(`任务 ${taskId} 已开始执行`)
         } else {
-            alert(`任务执行失败: ${result.msg}`)
+            toast.error(`任务执行失败: ${result.msg}`)
         }
     } catch (e: any) {
-        alert(`任务执行失败: ${e.message || '未知错误'}`)
+        toast.error(`任务执行失败: ${e.message || '未知错误'}`)
     } finally {
         // Remove from running after a delay
         setTimeout(() => {
@@ -87,7 +90,7 @@ const formatLastRun = (lastRun?: string) => {
         const diffMs = now.getTime() - date.getTime()
         const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
         const diffMins = Math.floor(diffMs / (1000 * 60))
-        
+
         if (diffMins < 60) {
             return `${diffMins} 分钟前`
         } else if (diffHours < 24) {
@@ -99,6 +102,41 @@ const formatLastRun = (lastRun?: string) => {
         return lastRun
     }
 }
+
+// 计算平均运行时间
+const getAvgRunTime = (task: Task) => {
+    const runCount = task.total_run_count || 0
+    const totalTime = task.total_run_time || 0
+    if (runCount === 0) return '--'
+    const avgSeconds = totalTime / runCount
+    if (avgSeconds < 60) {
+        return `${Math.round(avgSeconds)} 秒`
+    } else {
+        return `${(avgSeconds / 60).toFixed(1)} 分钟`
+    }
+}
+
+// 计算总体平均运行时间
+const overallAvgRunTime = computed(() => {
+    let totalTime = 0
+    let totalRuns = 0
+    for (const task of store.tasks) {
+        totalTime += task.total_run_time || 0
+        totalRuns += task.total_run_count || 0
+    }
+    if (totalRuns === 0) return '--'
+    const avgSeconds = totalTime / totalRuns
+    if (avgSeconds < 60) {
+        return `${Math.round(avgSeconds)} 秒`
+    } else {
+        return `${(avgSeconds / 60).toFixed(1)} 分钟`
+    }
+})
+
+// 计算总抓取数据条数
+const totalInfoCount = computed(() => {
+    return store.tasks.reduce((sum, task) => sum + (task.total_info_count || 0), 0)
+})
 
 onMounted(() => {
     store.fetchTasks()
@@ -119,8 +157,8 @@ onMounted(() => {
       </Button>
     </div>
 
-    <!-- Stats Overview (Placeholder/Real) -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <!-- Stats Overview -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card class="p-6 flex items-center">
             <div class="p-3 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 mr-4">
                 <Database class="w-6 h-6" />
@@ -140,13 +178,21 @@ onMounted(() => {
             </div>
         </Card>
         <Card class="p-6 flex items-center">
-             <!-- Placeholder for run time -->
             <div class="p-3 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 mr-4">
                 <Clock class="w-6 h-6" />
             </div>
             <div>
                 <p class="text-sm font-medium text-gray-500 dark:text-gray-400">平均运行时间</p>
-                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ overallAvgRunTime }}</p>
+            </div>
+        </Card>
+        <Card class="p-6 flex items-center">
+            <div class="p-3 rounded-full bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 mr-4">
+                <FileText class="w-6 h-6" />
+            </div>
+            <div>
+                <p class="text-sm font-medium text-gray-500 dark:text-gray-400">累计抓取数据</p>
+                <p class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ totalInfoCount }} 条</p>
             </div>
         </Card>
     </div>
@@ -174,10 +220,18 @@ onMounted(() => {
                     <span class="text-gray-500 dark:text-gray-400">调度</span>
                     <span class="font-medium text-gray-900 dark:text-gray-100 text-right max-w-[200px] truncate" :title="getScheduleDisplay(task)">{{ getScheduleDisplay(task) }}</span>
                 </div>
-                 <!-- Stats placeholder -->
+                 <!-- Stats -->
                 <div class="flex items-center justify-between text-sm">
                     <span class="text-gray-500 dark:text-gray-400">来源数</span>
                     <span class="font-medium text-gray-900 dark:text-gray-100">{{ (task.search?.length || 0) + (task.sources?.length || 0) }}</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-500 dark:text-gray-400">平均运行时间</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">{{ getAvgRunTime(task) }}</span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                    <span class="text-gray-500 dark:text-gray-400">抓取数据</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">{{ task.total_info_count || 0 }} 条</span>
                 </div>
                 
                 <div class="flex flex-wrap gap-2">

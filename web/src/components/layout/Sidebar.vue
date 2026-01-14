@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { 
-  LayoutDashboard, 
-  Newspaper, 
-  ListTodo, 
-  Settings, 
-  User, 
+import {
+  LayoutDashboard,
+  Newspaper,
+  ListTodo,
+  Settings,
+  User,
   HelpCircle,
-  Cpu,
   Database,
   Shield
 } from 'lucide-vue-next'
@@ -58,10 +57,10 @@ const menuItems = [
     <div class="p-4 border-t border-gray-100 dark:border-gray-700">
         <div class="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-3 flex items-center justify-between">
             <div class="flex items-center text-xs text-gray-500 dark:text-gray-400">
-                <Cpu class="w-4 h-4 mr-2" />
-                <span>计算额度</span>
+                <span class="w-4 h-4 mr-2 font-bold text-primary">SW</span>
+                <span>信永中和</span>
             </div>
-            <span class="font-mono text-sm font-bold text-primary">39,219</span>
+            <span class="text-sm text-gray-500 dark:text-gray-400">&copy; 2026</span>
         </div>
     </div>
   </aside>

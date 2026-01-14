@@ -28,6 +28,10 @@ export interface Task {
     last_run?: string
     status?: string
     errors?: string
+    // 统计字段
+    total_info_count?: number
+    total_run_count?: number
+    total_run_time?: number
 }
 
 export interface TaskRequest {

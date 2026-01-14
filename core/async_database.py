@@ -80,7 +80,11 @@ class AsyncDatabaseManager:
             'status': 'NUMERIC DEFAULT 0',
             # 错误信息，TEXT，int0 时为空
             'errors': 'TEXT DEFAULT ""',
-            'updated': 'TEXT'
+            'updated': 'TEXT',
+            # 统计字段
+            'total_info_count': 'INTEGER DEFAULT 0',  # 累计抓取数据条数
+            'total_run_count': 'INTEGER DEFAULT 0',   # 累计运行次数
+            'total_run_time': 'REAL DEFAULT 0'        # 累计运行时间(秒)
         },
         'local_proxies': {
             # Int, 自增
@@ -1082,7 +1086,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         """
         if not task_id:
             return None
-        allowed = {"focuses", "search", "sources", "activated", "time_slots", "schedule_mode", "custom_times", "interval_hours", "last_run", "title", "status", "errors", "updated"}
+        allowed = {"focuses", "search", "sources", "activated", "time_slots", "schedule_mode", "custom_times", "interval_hours", "last_run", "title", "status", "errors", "updated", "total_info_count", "total_run_count", "total_run_time"}
         updates = {}
         
         # 仅校验用户传入的字段

@@ -245,6 +245,31 @@ async def execute_time_slot_tasks(time_slot: str):
         # 7. 清理资源
         await graceful_shutdown(crawlers, db_manager, cache_manager)
 
+async def update_task_stats(db_manager, task_id: int, info_added: int, run_time: float):
+    """更新任务的统计字段"""
+    try:
+        # 获取当前任务数据
+        all_tasks = await db_manager.list_tasks()
+        if not all_tasks:
+            return
+        task = next((t for t in all_tasks if t['id'] == task_id), None)
+        if not task:
+            return
+
+        # 累加统计值
+        current_info_count = task.get('total_info_count', 0) or 0
+        current_run_count = task.get('total_run_count', 0) or 0
+        current_run_time = task.get('total_run_time', 0) or 0
+
+        await db_manager.update_task(
+            task_id,
+            total_info_count=current_info_count + info_added,
+            total_run_count=current_run_count + 1,
+            total_run_time=current_run_time + run_time
+        )
+    except Exception as e:
+        wis_logger.warning(f"更新任务统计失败: {e}")
+
 async def process_single_result(result, task_job_count, db_manager):
     """处理单个任务的结果"""
     task_id, status, msg, apply_count, recorder = result
@@ -293,6 +318,8 @@ async def process_single_result(result, task_job_count, db_manager):
         task_id = await db_manager.update_task(task_id, status=task_job_count[task_id]['status'], errors=error_msg,
                                                last_run=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                                                updated=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'))
+        # 更新统计字段（需要先获取当前值再累加）
+        await update_task_stats(db_manager, task_id, task_job_count[task_id]['info_added'], cost_time)
         if task_id is None:
             wis_logger.warning(f"✗ 任务状态更新失败: {task_id}")
             await notify_user(11, [str(task_id)])
