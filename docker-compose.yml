@@ -13,6 +13,7 @@ services:
       - WISEFLOW_DISABLE_TASKS=0  # 启用定时任务调度器
       - BROWSER_CHANNEL=chromium  # ARM64 兼容
       - BROWSER_HEADLESS=true  # Docker 环境必须使用 headless 模式
+      - WISEFLOW_RSS_INSECURE_HOSTS=wx.vfunapp.com
     env_file:
       - .env
     volumes:
