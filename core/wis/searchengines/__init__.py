@@ -90,6 +90,18 @@ async def search_with_engine(engine: str,
                 await notify_user(15, ['bing'])
                 return [], "", {}
             wis_logger.info(f"[bing] crawler success, html length: {len(result.html) if result.html else 0}")
+
+            # Check for CAPTCHA/block pages
+            if result.html:
+                captcha_indicators = ['captcha', 'unusual traffic', 'verify you are human', 'robot', 'blocked']
+                is_blocked = any(indicator in result.html.lower() for indicator in captcha_indicators)
+                if is_blocked:
+                    wis_logger.warning(f"[bing] Detected possible CAPTCHA/block page!")
+
+                # Check for cn.bing.com redirect
+                if 'cn.bing.com' in result.html or 'bing.com/search?q=' not in result.html:
+                    wis_logger.info(f"[bing] Page may have redirected to CN Bing or different domain")
+
             # Debug: find and print the b_results section
             if result.html and 'b_results' in result.html:
                 start_idx = result.html.find('id="b_results"')
@@ -98,7 +110,13 @@ async def search_with_engine(engine: str,
                     preview = result.html[start_idx:start_idx+8000]
                     wis_logger.info(f"[bing] b_results section (8000 chars):\n{preview}")
                 else:
-                    wis_logger.info(f"[bing] b_results found but couldn't locate id attribute")
+                    # Try to find class-based b_results
+                    class_idx = result.html.find('class="b_results"')
+                    if class_idx > 0:
+                        preview = result.html[class_idx:class_idx+8000]
+                        wis_logger.info(f"[bing] b_results (class-based) section (8000 chars):\n{preview}")
+                    else:
+                        wis_logger.info(f"[bing] b_results found but couldn't locate id or class attribute")
             html = result.html
 
         search_results = engine_module.parse_response(html)
@@ -111,7 +129,22 @@ async def search_with_engine(engine: str,
             if cache_manager:
                 await cache_manager.set(query, search_results, 60*24, namespace=engine)
         else:
-            wis_logger.warning(f"[{engine}] No results parsed! HTML contains 'b_results': {'b_results' in html if html else False}, 'b_algo': {'b_algo' in html if html else False}")
+            # Enhanced debug info for troubleshooting
+            html_info = ""
+            if html:
+                html_info = (
+                    f"'b_results': {'b_results' in html}, "
+                    f"'b_algo': {'b_algo' in html}, "
+                    f"'id=\"b_results\"': {'id=\"b_results\"' in html}, "
+                    f"'class=\"b_results\"': {'class=\"b_results\"' in html or 'class=b_results' in html}, "
+                    f"'b_content': {'b_content' in html}"
+                )
+                # Log a snippet of the HTML around b_results if present
+                if 'b_results' in html:
+                    idx = html.find('b_results')
+                    snippet = html[max(0, idx-50):idx+200]
+                    wis_logger.debug(f"[{engine}] HTML snippet around 'b_results': {snippet}")
+            wis_logger.warning(f"[{engine}] No results parsed! HTML contains {html_info}")
             # Do NOT cache empty results - next attempt may succeed
 
     articles = []

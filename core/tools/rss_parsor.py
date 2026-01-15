@@ -1,5 +1,7 @@
 import httpx
 import certifi
+import os
+from urllib.parse import urlparse
 import feedparser
 from core.async_logger import wis_logger
 from core.wis import CrawlResult, SqliteCache
@@ -7,6 +9,28 @@ from typing import List, Tuple
 from core.wis.ws_connect import notify_user
 from core.tools.general_utils import normalize_publish_date
 import asyncio
+
+
+def _rss_verify_value() -> str:
+    return (
+        os.getenv("WISEFLOW_RSS_CA_BUNDLE")
+        or os.getenv("SSL_CERT_FILE")
+        or os.getenv("REQUESTS_CA_BUNDLE")
+        or certifi.where()
+    )
+
+
+def _rss_skip_verify(url: str) -> bool:
+    if os.getenv("WISEFLOW_RSS_SKIP_VERIFY") == "1":
+        return True
+    insecure_hosts = os.getenv("WISEFLOW_RSS_INSECURE_HOSTS", "").strip()
+    if not insecure_hosts:
+        return False
+    if insecure_hosts == "*":
+        return True
+    hostname = (urlparse(url).hostname or "").lower()
+    host_set = {host.strip().lower() for host in insecure_hosts.split(",") if host.strip()}
+    return hostname in host_set
 
 
 async def fetch_rss(url, existings: set=set(), cache_manager: SqliteCache = None) -> Tuple[List[CrawlResult], str, dict]:
@@ -19,9 +43,10 @@ async def fetch_rss(url, existings: set=set(), cache_manager: SqliteCache = None
     if not entries:
         max_retries = 3
         base_delay = 10  # seconds
+        verify_value = False if _rss_skip_verify(url) else _rss_verify_value()
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=30, verify=certifi.where()) as client:
+                async with httpx.AsyncClient(timeout=30, verify=verify_value) as client:
                     response = await client.get(url)
                     response.raise_for_status()
                 content = response.content  # bytes

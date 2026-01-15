@@ -37,9 +37,26 @@ def parse_response(response_text: str) -> list[dict]:
     results = []
     dom = html.fromstring(response_text)
 
-    # parse results again if nothing is found yet
+    # Try multiple selectors for Bing results - structure may vary by region/language
+    selectors = [
+        '//ol[@id="b_results"]/li[contains(@class, "b_algo")]',  # Standard structure
+        '//ol[contains(@class, "b_results")]/li[contains(@class, "b_algo")]',  # Class-based container
+        '//div[@id="b_results"]//li[contains(@class, "b_algo")]',  # Div container variant
+        '//li[contains(@class, "b_algo")]',  # Direct li search fallback
+        '//div[contains(@class, "b_algo")]',  # Div-based results
+        # CN Bing / alternative structures (no b_algo class)
+        '//ol[@id="b_results"]/li[h2/a]',  # Any li with h2/a link structure
+        '//div[@id="b_content"]//li[h2/a]',  # Alternative container
+        '//main//li[.//h2/a and .//p]',  # Generic: li containing h2 link and paragraph
+    ]
 
-    for result in eval_xpath_list(dom, '//ol[@id="b_results"]/li[contains(@class, "b_algo")]'):
+    result_elements = []
+    for selector in selectors:
+        result_elements = eval_xpath_list(dom, selector)
+        if result_elements:
+            break
+
+    for result in result_elements:
 
         link = eval_xpath_getindex(result, './/h2/a', 0, None)
         if link is None:
