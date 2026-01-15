@@ -1010,7 +1010,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         result: List[dict] = []
 
         async def _list(db):
-            base = "SELECT id, focuses, search, sources, activated, schedule_mode, time_slots, custom_times, interval_hours, last_run, title, status, errors, updated FROM tasks"
+            base = "SELECT id, focuses, search, sources, activated, schedule_mode, time_slots, custom_times, interval_hours, last_run, title, status, errors, updated, total_info_count, total_run_count, total_run_time FROM tasks"
             query = base + (" WHERE activated = 1" if only_activated else "") + " ORDER BY id DESC"
             async with db.execute(query) as cursor:
                 rows = await cursor.fetchall()
@@ -1047,7 +1047,12 @@ CREATE TABLE IF NOT EXISTS {table_name} (
                     
                     # 转换布尔值字段
                     item['activated'] = bool(item.get('activated', 1))
-                    
+
+                    # 处理统计字段，确保有默认值
+                    item['total_info_count'] = item.get('total_info_count') or 0
+                    item['total_run_count'] = item.get('total_run_count') or 0
+                    item['total_run_time'] = item.get('total_run_time') or 0
+
                     # 处理 errors：用 '|' split 并转为 set
                     errors = item.get('errors', '') or ''
                     if errors:
