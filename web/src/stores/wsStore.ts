@@ -19,7 +19,19 @@ export const useWsStore = defineStore('ws', () => {
     let pingInterval: any = null
 
     function connect() {
-        const wsUrl = (import.meta.env.VITE_API_URL || 'ws://localhost:8077').replace('http', 'ws') + '/ws'
+        // Determine WebSocket URL based on environment
+        let wsUrl: string
+        if (import.meta.env.VITE_API_URL) {
+            // Use configured API URL
+            wsUrl = import.meta.env.VITE_API_URL.replace(/^http/, 'ws') + '/ws'
+        } else if (window.location.hostname === 'localhost' && window.location.port === '5173') {
+            // Dev server
+            wsUrl = 'ws://localhost:8077/ws'
+        } else {
+            // Production: use current host with /ws path (nginx proxy)
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+            wsUrl = `${protocol}//${window.location.host}/ws`
+        }
         ws = new WebSocket(wsUrl)
 
         ws.onopen = () => {
