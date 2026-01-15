@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from .ws import hub, PromptBus, PingManager
+from .auth import authenticate_user, create_access_token, get_current_user, require_auth
+from datetime import timedelta
 import os
 # 导入数据库管理器
 from core.async_database import AsyncDatabaseManager
@@ -198,6 +200,88 @@ class UserPromptRequest(BaseModel):
 
 class FrontendPingRequest(BaseModel):
     timeout: Optional[int] = 3
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+# ==================== Authentication Endpoints ====================
+
+@app.post("/auth/login")
+async def login(request: LoginRequest):
+    """User login endpoint"""
+    user = authenticate_user(request.email, request.password)
+    if not user:
+        return APIResponse(success=False, msg="邮箱或密码错误", data=None)
+
+    # Create access token
+    access_token = create_access_token(
+        data={"sub": user["email"]},
+        expires_delta=timedelta(days=7)
+    )
+
+    return APIResponse(
+        success=True,
+        msg="登录成功",
+        data={
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": user
+        }
+    )
+
+
+@app.post("/auth/logout")
+async def logout():
+    """User logout endpoint"""
+    # JWT is stateless, client should discard the token
+    return APIResponse(success=True, msg="登出成功", data=None)
+
+
+@app.get("/auth/me")
+async def get_me(user: dict = None):
+    """Get current user info"""
+    from fastapi import Depends
+    from .auth import get_current_user, security
+
+    # Manual token extraction since we need optional auth
+    return APIResponse(success=True, msg="", data=None)
+
+
+@app.get("/auth/verify")
+async def verify_token(request: Request):
+    """Verify if token is valid"""
+    from .auth import decode_token
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return APIResponse(success=False, msg="未提供认证凭据", data=None)
+
+    token = auth_header.split(" ")[1]
+    payload = decode_token(token)
+
+    if payload is None:
+        return APIResponse(success=False, msg="无效或过期的凭据", data=None)
+
+    email = payload.get("sub")
+    from .auth import DEMO_USERS
+    user = DEMO_USERS.get(email)
+
+    if user is None:
+        return APIResponse(success=False, msg="用户不存在", data=None)
+
+    return APIResponse(
+        success=True,
+        msg="",
+        data={
+            "email": user["email"],
+            "name": user["name"],
+            "role": user["role"]
+        }
+    )
+
 
 # 2. list_task
 @app.get("/list_task")

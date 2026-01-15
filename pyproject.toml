@@ -70,12 +70,15 @@ dependencies = [
     "chardet>=5.2.0",
     # Retry mechanism
     "tenacity==9.0.0", # Compatible with SignSrv
+    "certifi>=2024.12.14",
     # Office file processing
     "openpyxl",
     # Task scheduling
     "schedule>=1.2.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    # Authentication
+    "PyJWT>=2.8.0",
 ]
 
 [project.optional-dependencies]

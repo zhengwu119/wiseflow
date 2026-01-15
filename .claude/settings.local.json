@@ -17,7 +17,9 @@
       "Bash(git restore:*)",
       "Bash(sqlite3:*)",
       "Bash(git add:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(pip install:*)"
     ]
   }
 }

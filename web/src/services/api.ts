@@ -19,6 +19,36 @@ const client = axios.create({
     timeout: 30000,
 })
 
+// Request interceptor to add auth token
+client.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('auth_token')
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`
+        }
+        return config
+    },
+    (error) => {
+        return Promise.reject(error)
+    }
+)
+
+// Response interceptor to handle 401 errors
+client.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 401) {
+            // Token expired or invalid, clear it and redirect to login
+            localStorage.removeItem('auth_token')
+            // Only redirect if not already on login page
+            if (!window.location.pathname.includes('/login')) {
+                window.location.href = '/login'
+            }
+        }
+        return Promise.reject(error)
+    }
+)
+
 export const api = {
     // Task Management
     listTasks: () => client.get<APIResponse<Task[]>>('/list_task').then(res => res.data),
@@ -84,4 +114,11 @@ export const api = {
 
     // WebSocket History
     getWsHistory: (limit: number = 10, offset: number = 0) => client.get<APIResponse<any[]>>('/ws_history', { params: { limit, offset } }).then(res => res.data),
+
+    // Authentication
+    login: (email: string, password: string) => client.post<APIResponse<{ access_token: string; token_type: string; user: any }>>('/auth/login', { email, password }).then(res => res.data),
+
+    logout: () => client.post<APIResponse<null>>('/auth/logout').then(res => res.data),
+
+    verifyToken: () => client.get<APIResponse<any>>('/auth/verify').then(res => res.data),
 }

@@ -1,4 +1,5 @@
 import httpx
+import certifi
 import feedparser
 from core.async_logger import wis_logger
 from core.wis import CrawlResult, SqliteCache
@@ -20,7 +21,7 @@ async def fetch_rss(url, existings: set=set(), cache_manager: SqliteCache = None
         base_delay = 10  # seconds
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=30) as client:
+                async with httpx.AsyncClient(timeout=30, verify=certifi.where()) as client:
                     response = await client.get(url)
                     response.raise_for_status()
                 content = response.content  # bytes

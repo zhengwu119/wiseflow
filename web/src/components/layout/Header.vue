@@ -1,11 +1,34 @@
 <script setup lang="ts">
-import { Bell, Moon, Sun } from 'lucide-vue-next'
+import { Bell, Moon, Sun, LogOut } from 'lucide-vue-next'
 import { useDark, useToggle } from '@vueuse/core'
 import { useWsStore } from '../../stores/wsStore'
+import { useAuthStore } from '../../stores/authStore'
+import { useRouter } from 'vue-router'
 
 const isDark = useDark()
 const toggleDark = useToggle(isDark)
 const wsStore = useWsStore()
+const authStore = useAuthStore()
+const router = useRouter()
+
+const handleLogout = () => {
+    authStore.logout()
+    router.push('/login')
+}
+
+// Get user display name
+const getUserName = () => {
+    return authStore.user?.name || authStore.user?.email || 'User'
+}
+
+const getUserEmail = () => {
+    return authStore.user?.email || ''
+}
+
+const getAvatarUrl = () => {
+    const name = getUserName().replace(/\s+/g, '+')
+    return `https://ui-avatars.com/api/?name=${name}&background=52c41a&color=fff`
+}
 </script>
 
 <template>
@@ -45,12 +68,22 @@ const wsStore = useWsStore()
 
         <!-- User Profile -->
         <div class="flex items-center pl-4 border-l border-gray-100 dark:border-gray-700">
-            <img class="h-8 w-8 rounded-full bg-gray-200" src="https://ui-avatars.com/api/?name=Admin+User&background=52c41a&color=fff" alt="" />
+            <img class="h-8 w-8 rounded-full bg-gray-200" :src="getAvatarUrl()" alt="" />
             <div class="ml-3 hidden md:block">
-                <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Admin User</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">admin@wiseflow.ai</p>
+                <p class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ getUserName() }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ getUserEmail() }}</p>
             </div>
         </div>
+
+        <!-- Logout Button -->
+        <button
+            @click="handleLogout"
+            class="flex items-center space-x-1 px-3 py-2 text-sm text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 transition-colors"
+            title="退出登录"
+        >
+            <LogOut class="w-4 h-4" />
+            <span class="hidden md:inline">退出</span>
+        </button>
     </div>
   </header>
 </template>
